@@ -163,138 +163,163 @@ if ( ! function_exists( 'ans_comp_issue' ) ) {
 		$first = $parts[0];
 		$last  = isset( $parts[1] ) ? $parts[1] : '';
 
-		// --- build the order --------------------------------------------
-		$retail_each  = (float) $product->get_regular_price( 'edit' );
-		$retail_total = round( $retail_each * $qty, 2 );
-
-		$order = wc_create_order( array( 'status' => 'pending', 'customer_id' => 0 ) );
-		if ( is_wp_error( $order ) ) {
-			return $order;
-		}
-
-		$order->set_address(
-			array(
-				'first_name' => $first,
-				'last_name'  => $last,
-				'email'      => $email,
-			),
-			'billing'
-		);
-
-		// ---------------------------------------------------------------
-		// Neutralise the Bridge's OWN auto-generation hook while we build.
-		//
-		// The Bridge hooks woocommerce_new_order_item and gates on live
-		// checkout data - but handle_post() falls back to php://input when
-		// $_POST is empty. In a REST context our own JSON request body
-		// satisfies that gate, so the Bridge generates a full set of tickets
-		// the moment add_product() runs. Our explicit call then generated a
-		// SECOND set: the first staging run asked for 2 tickets and produced
-		// 4. Caught by the read-back below, which is the whole reason it is
-		// there.
-		//
-		// Removing the hook makes generation deterministic in every context -
-		// REST, WP-CLI, cron, an admin form post - instead of depending on
-		// whether the ambient request happens to carry a body.
-		// ---------------------------------------------------------------
-		remove_action( 'woocommerce_new_order_item', array( $bridge, 'create_order_ticket_instances' ), 11 );
+		// Keep comp recipients out of Mailchimp until Kim has decided whether they
+		// belong there. The add-on subscribes at order CREATION and offers no skip
+		// filter, so the only route is to lift its hooks for the duration.
+		// See includes/mailchimp.php.
+		$mc_suppressed = ans_comp_mailchimp_suppress();
 
 		try {
-			// Retail as subtotal, zero as total. WooCommerce renders that
-			// natively as a discount, so the order reads "$40.00 -> $0.00"
-			// rather than looking like a ticket sold for nothing.
-			$item_id = $order->add_product(
-				$product,
-				$qty,
-				array(
-					'subtotal' => $retail_total,
-					'total'    => 0,
-				)
-			);
-		} finally {
-			add_action( 'woocommerce_new_order_item', array( $bridge, 'create_order_ticket_instances' ), 11, 3 );
-		}
+			// --- build the order --------------------------------------------
+			$retail_each  = (float) $product->get_regular_price( 'edit' );
+			$retail_total = round( $retail_each * $qty, 2 );
 
-		if ( ! $item_id ) {
-			$order->update_status( 'failed', 'ans-comp-tickets: could not add the ticket line item. ' );
-			return new WP_Error( 'ans_comp_no_item', 'Could not add the ticket line item to the order.' );
-		}
+			// Build the order with the comp flag ALREADY SET, then save.
+			//
+			// wc_create_order() saves immediately, which fires woocommerce_new_order
+			// before any meta is written - so anything listening on that hook sees an
+			// order with no _ans_comp flag and no billing email. The Tickera Mailchimp
+			// add-on listens there. Setting the flag before save() closes that window
+			// and makes the meta a reliable signal for any other listener too.
+			$order = new WC_Order();
+			$order->set_status( 'pending' );
+			$order->set_customer_id( 0 );
+			$order->update_meta_data( $k['flag'], 'yes' );
+			$order->update_meta_data( $k['source'], sanitize_key( $a['source'] ) );
+			$order->save();
 
-		$order->update_meta_data( $k['flag'], 'yes' );
-		$order->update_meta_data( $k['reason'], $reason );
-		$order->update_meta_data( $k['issued_by'], (int) $a['issued_by'] );
-		$order->update_meta_data( $k['source'], sanitize_key( $a['source'] ) );
-		$order->update_meta_data( $k['retail'], $retail_total );
-		if ( $a['claimant_user_id'] ) {
-			$order->update_meta_data( $k['claimant'], (int) $a['claimant_user_id'] );
-		}
-
-		$order->calculate_totals( false ); // false = do not calculate taxes
-		$order->set_total( 0 );
-
-		// Idempotency guard, set BEFORE the factory runs.
-		// create_order_ticket_instances() is not idempotent - calling it twice
-		// on the same item creates duplicate tickets.
-		if ( $order->get_meta( $k['generated'] ) ) {
-			return new WP_Error( 'ans_comp_already_generated', 'This order has already had tickets generated.' );
-		}
-		$order->update_meta_data( $k['generated'], time() );
-		$order->save();
-
-		// --- call the Bridge's own ticket factory -----------------------
-		foreach ( $order->get_items() as $line_id => $line ) {
-			$bridge->create_order_ticket_instances(
-				$line_id,
-				$line,
-				$order->get_id(),
-				array( 'ans_comp' => 1 ), // non-empty: this is what clears the $_POST gate
-				true,
-				$order
-			);
-		}
-
-		// --- verify by read-back ----------------------------------------
-		$tickets = ans_comp_count_tickets( $order->get_id() );
-		if ( count( $tickets ) !== $qty ) {
-
-			// Trash whatever was generated. A failed comp order must not leave
-			// live ticket instances behind - they carry real codes and would
-			// scan at the door if the order were ever moved to completed.
-			foreach ( $tickets as $ticket_id ) {
-				wp_trash_post( $ticket_id );
+			if ( is_wp_error( $order ) || ! $order->get_id() ) {
+				return new WP_Error( 'ans_comp_no_order', 'Could not create the WooCommerce order.' );
 			}
 
-			$order->update_status(
-				'failed',
-				sprintf( 'ans-comp-tickets: expected %d ticket instances, found %d. Tickets trashed, nothing delivered. ', $qty, count( $tickets ) )
-			);
-			return new WP_Error(
-				'ans_comp_generation_mismatch',
-				sprintf( 'Ticket generation did not produce the expected count: wanted %d, got %d. Order %d left as failed and its tickets trashed.', $qty, count( $tickets ), $order->get_id() ),
+			$order->set_address(
 				array(
-					'order_id'         => $order->get_id(),
-					'ticket_ids'       => $tickets,
-					'tickets_trashed'  => true,
-				)
+					'first_name' => $first,
+					'last_name'  => $last,
+					'email'      => $email,
+				),
+				'billing'
 			);
+
+			// ---------------------------------------------------------------
+			// Neutralise the Bridge's OWN auto-generation hook while we build.
+			//
+			// The Bridge hooks woocommerce_new_order_item and gates on live
+			// checkout data - but handle_post() falls back to php://input when
+			// $_POST is empty. In a REST context our own JSON request body
+			// satisfies that gate, so the Bridge generates a full set of tickets
+			// the moment add_product() runs. Our explicit call then generated a
+			// SECOND set: the first staging run asked for 2 tickets and produced
+			// 4. Caught by the read-back below, which is the whole reason it is
+			// there.
+			//
+			// Removing the hook makes generation deterministic in every context -
+			// REST, WP-CLI, cron, an admin form post - instead of depending on
+			// whether the ambient request happens to carry a body.
+			// ---------------------------------------------------------------
+			remove_action( 'woocommerce_new_order_item', array( $bridge, 'create_order_ticket_instances' ), 11 );
+
+			try {
+				// Retail as subtotal, zero as total. WooCommerce renders that
+				// natively as a discount, so the order reads "$40.00 -> $0.00"
+				// rather than looking like a ticket sold for nothing.
+				$item_id = $order->add_product(
+					$product,
+					$qty,
+					array(
+						'subtotal' => $retail_total,
+						'total'    => 0,
+					)
+				);
+			} finally {
+				add_action( 'woocommerce_new_order_item', array( $bridge, 'create_order_ticket_instances' ), 11, 3 );
+			}
+
+			if ( ! $item_id ) {
+				$order->update_status( 'failed', 'ans-comp-tickets: could not add the ticket line item. ' );
+				return new WP_Error( 'ans_comp_no_item', 'Could not add the ticket line item to the order.' );
+			}
+
+			$order->update_meta_data( $k['flag'], 'yes' );
+			$order->update_meta_data( $k['reason'], $reason );
+			$order->update_meta_data( $k['issued_by'], (int) $a['issued_by'] );
+			$order->update_meta_data( $k['source'], sanitize_key( $a['source'] ) );
+			$order->update_meta_data( $k['retail'], $retail_total );
+			if ( $a['claimant_user_id'] ) {
+				$order->update_meta_data( $k['claimant'], (int) $a['claimant_user_id'] );
+			}
+
+			$order->calculate_totals( false ); // false = do not calculate taxes
+			$order->set_total( 0 );
+
+			// Idempotency guard, set BEFORE the factory runs.
+			// create_order_ticket_instances() is not idempotent - calling it twice
+			// on the same item creates duplicate tickets.
+			if ( $order->get_meta( $k['generated'] ) ) {
+				return new WP_Error( 'ans_comp_already_generated', 'This order has already had tickets generated.' );
+			}
+			$order->update_meta_data( $k['generated'], time() );
+			$order->save();
+
+			// --- call the Bridge's own ticket factory -----------------------
+			foreach ( $order->get_items() as $line_id => $line ) {
+				$bridge->create_order_ticket_instances(
+					$line_id,
+					$line,
+					$order->get_id(),
+					array( 'ans_comp' => 1 ), // non-empty: this is what clears the $_POST gate
+					true,
+					$order
+				);
+			}
+
+			// --- verify by read-back ----------------------------------------
+			$tickets = ans_comp_count_tickets( $order->get_id() );
+			if ( count( $tickets ) !== $qty ) {
+
+				// Trash whatever was generated. A failed comp order must not leave
+				// live ticket instances behind - they carry real codes and would
+				// scan at the door if the order were ever moved to completed.
+				foreach ( $tickets as $ticket_id ) {
+					wp_trash_post( $ticket_id );
+				}
+
+				$order->update_status(
+					'failed',
+					sprintf( 'ans-comp-tickets: expected %d ticket instances, found %d. Tickets trashed, nothing delivered. ', $qty, count( $tickets ) )
+				);
+				return new WP_Error(
+					'ans_comp_generation_mismatch',
+					sprintf( 'Ticket generation did not produce the expected count: wanted %d, got %d. Order %d left as failed and its tickets trashed.', $qty, count( $tickets ), $order->get_id() ),
+					array(
+						'order_id'         => $order->get_id(),
+						'ticket_ids'       => $tickets,
+						'tickets_trashed'  => true,
+					)
+				);
+			}
+
+			// Completing last means the completed-order email carries the PDFs.
+			$order->update_status(
+				'completed',
+				sprintf( 'Complimentary ticket issued (%s). Reason: %s ', sanitize_key( $a['source'] ), $reason )
+			);
+
+			return array(
+				'ok'           => true,
+				'order_id'     => $order->get_id(),
+				'order_status' => $order->get_status(),
+				'event_id'     => $event_id,
+				'product_id'   => $pid,
+				'qty'          => $qty,
+				'retail_value' => $retail_total,
+				'ticket_ids'   => $tickets,
+				'recipient'    => $email,
+			);
+		} finally {
+			if ( $mc_suppressed ) {
+				ans_comp_mailchimp_restore();
+			}
 		}
-
-		// Completing last means the completed-order email carries the PDFs.
-		$order->update_status(
-			'completed',
-			sprintf( 'Complimentary ticket issued (%s). Reason: %s ', sanitize_key( $a['source'] ), $reason )
-		);
-
-		return array(
-			'ok'           => true,
-			'order_id'     => $order->get_id(),
-			'order_status' => $order->get_status(),
-			'event_id'     => $event_id,
-			'product_id'   => $pid,
-			'qty'          => $qty,
-			'retail_value' => $retail_total,
-			'ticket_ids'   => $tickets,
-			'recipient'    => $email,
-		);
 	}
 }

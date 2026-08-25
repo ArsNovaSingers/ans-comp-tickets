@@ -181,17 +181,39 @@ if ( ! function_exists( 'ans_comp_issue' ) ) {
 			'billing'
 		);
 
-		// Retail as subtotal, zero as total. WooCommerce renders that natively
-		// as a discount, so the order reads "$40.00 -> $0.00" rather than
-		// looking like a ticket sold for nothing.
-		$item_id = $order->add_product(
-			$product,
-			$qty,
-			array(
-				'subtotal' => $retail_total,
-				'total'    => 0,
-			)
-		);
+		// ---------------------------------------------------------------
+		// Neutralise the Bridge's OWN auto-generation hook while we build.
+		//
+		// The Bridge hooks woocommerce_new_order_item and gates on live
+		// checkout data - but handle_post() falls back to php://input when
+		// $_POST is empty. In a REST context our own JSON request body
+		// satisfies that gate, so the Bridge generates a full set of tickets
+		// the moment add_product() runs. Our explicit call then generated a
+		// SECOND set: the first staging run asked for 2 tickets and produced
+		// 4. Caught by the read-back below, which is the whole reason it is
+		// there.
+		//
+		// Removing the hook makes generation deterministic in every context -
+		// REST, WP-CLI, cron, an admin form post - instead of depending on
+		// whether the ambient request happens to carry a body.
+		// ---------------------------------------------------------------
+		remove_action( 'woocommerce_new_order_item', array( $bridge, 'create_order_ticket_instances' ), 11 );
+
+		try {
+			// Retail as subtotal, zero as total. WooCommerce renders that
+			// natively as a discount, so the order reads "$40.00 -> $0.00"
+			// rather than looking like a ticket sold for nothing.
+			$item_id = $order->add_product(
+				$product,
+				$qty,
+				array(
+					'subtotal' => $retail_total,
+					'total'    => 0,
+				)
+			);
+		} finally {
+			add_action( 'woocommerce_new_order_item', array( $bridge, 'create_order_ticket_instances' ), 11, 3 );
+		}
 
 		if ( ! $item_id ) {
 			$order->update_status( 'failed', 'ans-comp-tickets: could not add the ticket line item. ' );
@@ -234,16 +256,25 @@ if ( ! function_exists( 'ans_comp_issue' ) ) {
 		// --- verify by read-back ----------------------------------------
 		$tickets = ans_comp_count_tickets( $order->get_id() );
 		if ( count( $tickets ) !== $qty ) {
+
+			// Trash whatever was generated. A failed comp order must not leave
+			// live ticket instances behind - they carry real codes and would
+			// scan at the door if the order were ever moved to completed.
+			foreach ( $tickets as $ticket_id ) {
+				wp_trash_post( $ticket_id );
+			}
+
 			$order->update_status(
 				'failed',
-				sprintf( 'ans-comp-tickets: expected %d ticket instances, found %d. Not delivering. ', $qty, count( $tickets ) )
+				sprintf( 'ans-comp-tickets: expected %d ticket instances, found %d. Tickets trashed, nothing delivered. ', $qty, count( $tickets ) )
 			);
 			return new WP_Error(
 				'ans_comp_generation_mismatch',
-				sprintf( 'Ticket generation did not produce the expected count: wanted %d, got %d. Order %d left as failed.', $qty, count( $tickets ), $order->get_id() ),
+				sprintf( 'Ticket generation did not produce the expected count: wanted %d, got %d. Order %d left as failed and its tickets trashed.', $qty, count( $tickets ), $order->get_id() ),
 				array(
-					'order_id'   => $order->get_id(),
-					'ticket_ids' => $tickets,
+					'order_id'         => $order->get_id(),
+					'ticket_ids'       => $tickets,
+					'tickets_trashed'  => true,
 				)
 			);
 		}

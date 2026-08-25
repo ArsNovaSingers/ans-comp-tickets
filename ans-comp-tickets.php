@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Ars Nova Comp Tickets
  * Plugin URI:  https://github.com/ArsNovaSingers/ans-comp-tickets
- * Description: Issues complimentary Tickera tickets without a checkout. Creates a real WooCommerce order, records the retail value forgone as a 100% comp discount, and calls the Tickera Bridge's own ticket factory directly so a genuine ticket PDF is generated. Two front doors are planned on this engine: an admin issue button for individual comps, and a Singers Portal claim panel for group allowances. v0.1.1 ships the engine and a diagnostics route only.
- * Version:     0.1.1
+ * Description: Issues complimentary Tickera tickets without a checkout. Creates a real WooCommerce order, records the retail value forgone as a 100% comp discount, and calls the Tickera Bridge's own ticket factory directly so a genuine ticket PDF is generated. Two front doors are planned on this engine: an admin issue button for individual comps, and a Singers Portal claim panel for group allowances. v0.1.2 ships the engine and a diagnostics route only.
+ * Version:     0.1.2
  * Author:      Ars Nova (Jonathan Raabe) + Claude
  * License:     GPL-2.0-or-later
  * Requires PHP: 7.4
@@ -43,7 +43,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 if ( ! defined( 'ANS_COMP_VERSION' ) ) {
-	define( 'ANS_COMP_VERSION', '0.1.1' );
+	define( 'ANS_COMP_VERSION', '0.1.2' );
 }
 
 require_once __DIR__ . '/includes/engine.php';

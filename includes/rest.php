@@ -13,15 +13,23 @@ if ( ! defined( 'ABSPATH' ) ) {
  * REST surface. Admin only.
  */
 if ( ! function_exists( 'ans_comp_register_routes' ) ) {
-	function ans_comp_register_routes() {
+	/**
+	 * Register the trio into one namespace.
+	 *
+	 * @param string $namespace REST namespace.
+	 * @param string $prefix    Route prefix, '' or 'comp'.
+	 */
+	function ans_comp_register_trio( $namespace, $prefix = '' ) {
 
 		$can = function () {
 			return current_user_can( 'manage_options' );
 		};
 
+		$base = $prefix ? '/' . trim( $prefix, '/' ) : '';
+
 		register_rest_route(
-			'ans-comp/v1',
-			'/diagnostics',
+			$namespace,
+			$base . '/diagnostics',
 			array(
 				'methods'             => 'GET',
 				'permission_callback' => $can,
@@ -30,8 +38,8 @@ if ( ! function_exists( 'ans_comp_register_routes' ) ) {
 		);
 
 		register_rest_route(
-			'ans-comp/v1',
-			'/issue',
+			$namespace,
+			$base . '/issue',
 			array(
 				'methods'             => 'POST',
 				'permission_callback' => $can,
@@ -40,14 +48,36 @@ if ( ! function_exists( 'ans_comp_register_routes' ) ) {
 		);
 
 		register_rest_route(
-			'ans-comp/v1',
-			'/ledger',
+			$namespace,
+			$base . '/ledger',
 			array(
 				'methods'             => 'GET',
 				'permission_callback' => $can,
 				'callback'            => 'ans_comp_rest_ledger',
 			)
 		);
+	}
+
+	/**
+	 * Registered TWICE, on purpose.
+	 *
+	 * ans-comp/v1 is the plugin's own namespace and is what a browser or any
+	 * ordinary REST client should use.
+	 *
+	 * ars-nova/v1/comp/* is a mirror, and it exists because the Ars Nova
+	 * WordPress MCP connector's ans_rest_call validates the namespace against a
+	 * CLOSED enum - ars-nova/v1, ans-ops/v1, ans-notes/v1, ansg/v1. A route in
+	 * any other namespace is unreachable from a Claude session no matter how
+	 * correctly it is written. Found the hard way on 2026-08-25: v0.1.0 shipped
+	 * with ans-comp/v1 only and could not be called at all.
+	 *
+	 * This is the project's own recurring failure mode - a documented capability
+	 * with no caller is the same bug as unreachable code. Remove the mirror only
+	 * once the connector accepts arbitrary ans-* namespaces.
+	 */
+	function ans_comp_register_routes() {
+		ans_comp_register_trio( 'ans-comp/v1', '' );
+		ans_comp_register_trio( 'ars-nova/v1', 'comp' );
 	}
 	add_action( 'rest_api_init', 'ans_comp_register_routes' );
 }

@@ -49,6 +49,26 @@ if ( ! function_exists( 'ans_comp_register_routes' ) ) {
 
 		register_rest_route(
 			$namespace,
+			$base . '/void',
+			array(
+				'methods'             => 'POST',
+				'permission_callback' => $can,
+				'callback'            => 'ans_comp_rest_void',
+			)
+		);
+
+		register_rest_route(
+			$namespace,
+			$base . '/sweep-orphans',
+			array(
+				'methods'             => 'POST',
+				'permission_callback' => $can,
+				'callback'            => 'ans_comp_rest_sweep',
+			)
+		);
+
+		register_rest_route(
+			$namespace,
 			$base . '/ledger',
 			array(
 				'methods'             => 'GET',
@@ -128,6 +148,9 @@ if ( ! function_exists( 'ans_comp_rest_diagnostics' ) ) {
 				'bridge_error'            => $bridge_err,
 				'tc_wb_hpos_helper'       => function_exists( 'tc_wb_hpos' ),
 				'ticket_instance_cpt'     => post_type_exists( 'tc_tickets_instances' ),
+				'ticket_cpt_in_core_rest' => (bool) ( get_post_type_object( 'tc_tickets_instances' ) ? get_post_type_object( 'tc_tickets_instances' )->show_in_rest : false ),
+				'failed_email_silenced'   => (bool) has_filter( 'woocommerce_email_recipient_failed_order', 'ans_comp_silence_admin_failure_email' ),
+				'mailchimp_addon_present' => ans_comp_mailchimp_present(),
 			) + $probe
 		);
 	}
@@ -227,5 +250,43 @@ if ( ! function_exists( 'ans_comp_rest_ledger' ) ) {
 				'rows'                 => $rows,
 			)
 		);
+	}
+}
+
+/**
+ * Void one comp order.
+ */
+if ( ! function_exists( 'ans_comp_rest_void' ) ) {
+	function ans_comp_rest_void( WP_REST_Request $request ) {
+
+		$result = ans_comp_void(
+			(int) $request->get_param( 'order_id' ),
+			(string) $request->get_param( 'reason' ),
+			(bool) $request->get_param( 'force' )
+		);
+
+		if ( is_wp_error( $result ) ) {
+			return new WP_REST_Response(
+				array(
+					'ok'      => false,
+					'error'   => $result->get_error_code(),
+					'message' => $result->get_error_message(),
+				),
+				400
+			);
+		}
+
+		return rest_ensure_response( $result );
+	}
+}
+
+/**
+ * Sweep ticket instances left behind on failed or cancelled comp orders.
+ *
+ * DRY RUN BY DEFAULT. Pass apply=true to actually delete.
+ */
+if ( ! function_exists( 'ans_comp_rest_sweep' ) ) {
+	function ans_comp_rest_sweep( WP_REST_Request $request ) {
+		return rest_ensure_response( ans_comp_sweep_orphans( (bool) $request->get_param( 'apply' ) ) );
 	}
 }

@@ -51,3 +51,9 @@ require_once __DIR__ . '/includes/mailchimp.php';
 require_once __DIR__ . '/includes/void.php';
 require_once __DIR__ . '/includes/emails.php';
 require_once __DIR__ . '/includes/rest.php';
+
+// Admin UI only - not needed on front-end or REST requests. admin-post.php sets
+// is_admin(), so both handlers still register.
+if ( is_admin() ) {
+	require_once __DIR__ . '/includes/admin.php';
+}

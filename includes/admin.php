@@ -91,15 +91,72 @@ if ( ! function_exists( 'ans_comp_admin_money' ) ) {
  * Menu
  * ---------------------------------------------------------------------- */
 
+if ( ! function_exists( 'ans_comp_admin_parent_slug' ) ) {
+	/**
+	 * The menu this screen belongs under: the Singers Portal.
+	 *
+	 * @return string
+	 */
+	function ans_comp_admin_parent_slug() {
+		return 'ansp-dashboard';
+	}
+}
+
 if ( ! function_exists( 'ans_comp_admin_menu' ) ) {
 	/**
-	 * Top level rather than a WooCommerce submenu: comps are an Ars Nova
-	 * decision, not a store function, and Kim should not have to know that a
-	 * comp is implemented as a WooCommerce order to find the screen.
+	 * Register the screen UNDER the Singers Portal menu.
+	 *
+	 * Jonathan, 2026-08-28: "put it as a link under the main singers portal menu
+	 * item." One place to look for Ars Nova operations, rather than a new
+	 * top-level item per plugin.
+	 *
+	 * This replaces a top-level add_menu_page(). The original reasoning was only
+	 * ever "not a WooCommerce submenu" - comps are an Ars Nova decision, not a
+	 * store function, and Kim should not have to know a comp is implemented as a
+	 * WooCommerce order to find it. That argument still holds; it simply never
+	 * considered the Singers Portal as the third option, and went to top level
+	 * by default.
+	 *
+	 * PRIORITY 11 IS LOAD-BEARING. ANSP_Dashboard registers 'ansp-dashboard' on
+	 * admin_menu at priority 9, so by 11 the parent exists whenever the portal is
+	 * active. At the default 10 the ordering would depend on plugin load order,
+	 * which is alphabetical and would put this plugin FIRST - the parent would
+	 * not exist yet and the submenu would silently vanish. It also stays below
+	 * the portal's own reorder pass at 999.
+	 *
+	 * FALLS BACK TO TOP LEVEL. ans-comp-tickets is a standalone plugin: it needs
+	 * WooCommerce and the Tickera Bridge, NOT the portal. If the portal is
+	 * inactive there is no parent to attach to, and a submenu on a missing parent
+	 * is simply unreachable. Kim losing the ability to issue a comp because a
+	 * members plugin was switched off would be a worse bug than an extra menu
+	 * item, so in that case it registers top level exactly as before.
+	 *
+	 * The page slug is unchanged, so ans_comp_admin_url(), both admin-post
+	 * handlers and every redirect keep working untouched either way.
 	 *
 	 * @return void
 	 */
 	function ans_comp_admin_menu() {
+		$parent = ans_comp_admin_parent_slug();
+
+		// add_menu_page() records its slug here; this is how we know the portal
+		// registered a parent we can hang off.
+		$parent_exists = isset( $GLOBALS['admin_page_hooks'] )
+			&& is_array( $GLOBALS['admin_page_hooks'] )
+			&& isset( $GLOBALS['admin_page_hooks'][ $parent ] );
+
+		if ( $parent_exists ) {
+			add_submenu_page(
+				$parent,
+				__( 'Comp Tickets', 'ans-comp-tickets' ),
+				__( 'Comp Tickets', 'ans-comp-tickets' ),
+				ans_comp_admin_cap(),
+				ans_comp_admin_slug(),
+				'ans_comp_admin_page'
+			);
+			return;
+		}
+
 		add_menu_page(
 			__( 'Comp Tickets', 'ans-comp-tickets' ),
 			__( 'Comp Tickets', 'ans-comp-tickets' ),
@@ -110,7 +167,7 @@ if ( ! function_exists( 'ans_comp_admin_menu' ) ) {
 			58
 		);
 	}
-	add_action( 'admin_menu', 'ans_comp_admin_menu' );
+	add_action( 'admin_menu', 'ans_comp_admin_menu', 11 );
 }
 
 /* -------------------------------------------------------------------------

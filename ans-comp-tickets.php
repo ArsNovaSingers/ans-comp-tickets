@@ -50,6 +50,8 @@ require_once __DIR__ . '/includes/engine.php';
 require_once __DIR__ . '/includes/mailchimp.php';
 require_once __DIR__ . '/includes/void.php';
 require_once __DIR__ . '/includes/emails.php';
+require_once __DIR__ . '/includes/recipient-note.php';
+require_once __DIR__ . '/includes/comp-from-element.php';
 require_once __DIR__ . '/includes/rest.php';
 
 // Admin UI only - not needed on front-end or REST requests. admin-post.php sets

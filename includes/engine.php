@@ -12,6 +12,16 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Meta keys, in one place so nothing goes hunting for a string literal.
  */
+/**
+ * Longest note we will carry to a recipient.
+ *
+ * An email is not a document. Past a few sentences the note pushes the ticket
+ * itself out of view, and this is text nobody reviews before it is sent.
+ */
+if ( ! defined( 'ANS_COMP_NOTE_MAX' ) ) {
+	define( 'ANS_COMP_NOTE_MAX', 500 );
+}
+
 if ( ! function_exists( 'ans_comp_meta_keys' ) ) {
 	function ans_comp_meta_keys() {
 		return array(
@@ -21,6 +31,7 @@ if ( ! function_exists( 'ans_comp_meta_keys' ) ) {
 			'source'    => '_ans_comp_source',       // admin | portal-claim | test
 			'retail'    => '_ans_comp_retail_value', // value forgone, in store currency
 			'claimant'  => '_ans_comp_claimant',     // portal claims only
+			'note'      => '_ans_comp_note',         // OPTIONAL message shown to the recipient
 			'generated' => '_ans_comp_generated',    // idempotency guard
 		);
 	}
@@ -89,6 +100,10 @@ if ( ! function_exists( 'ans_comp_count_tickets' ) ) {
  *     @type string $source          admin | portal-claim | test. Default 'admin'.
  *     @type int    $issued_by       WP user id of the actor. Default current user.
  *     @type int    $claimant_user_id Portal claims only. Default 0.
+ *     @type string $recipient_note  Optional message shown to the recipient in the
+ *                                   ticket email. NOT the reason - reason is the
+ *                                   internal record of why a comp was given and is
+ *                                   read by the ledger; this is a note TO the guest.
  * }
  * @return array|WP_Error
  */
@@ -104,6 +119,7 @@ if ( ! function_exists( 'ans_comp_issue' ) ) {
 			'source'           => 'admin',
 			'issued_by'        => get_current_user_id(),
 			'claimant_user_id' => 0,
+			'recipient_note'   => '',
 		);
 		$a = wp_parse_args( $args, $defaults );
 		$k = ans_comp_meta_keys();
@@ -156,6 +172,22 @@ if ( ! function_exists( 'ans_comp_issue' ) ) {
 		$reason = trim( wp_strip_all_tags( (string) $a['reason'] ) );
 		if ( '' === $reason ) {
 			return new WP_Error( 'ans_comp_no_reason', 'A reason is required. Every comp is a decision and the ledger records it.' );
+		}
+
+		/*
+		 * The recipient note is free text written by a singer or by Kim and rendered
+		 * into an HTML email that leaves the building. Strip tags on the way IN as
+		 * well as escaping on the way out - defence at both ends, because this is the
+		 * one field on a comp whose content nobody reviews before it is sent.
+		 *
+		 * Capped rather than unbounded: an email is not a document, and a pasted wall
+		 * of text would push the ticket itself out of view.
+		 */
+		$note = sanitize_textarea_field( (string) $a['recipient_note'] );
+		if ( function_exists( 'mb_substr' ) ) {
+			$note = mb_substr( $note, 0, ANS_COMP_NOTE_MAX );
+		} else {
+			$note = substr( $note, 0, ANS_COMP_NOTE_MAX );
 		}
 
 		$name  = trim( wp_strip_all_tags( (string) $a['recipient_name'] ) );
@@ -245,6 +277,9 @@ if ( ! function_exists( 'ans_comp_issue' ) ) {
 			$order->update_meta_data( $k['issued_by'], (int) $a['issued_by'] );
 			$order->update_meta_data( $k['source'], sanitize_key( $a['source'] ) );
 			$order->update_meta_data( $k['retail'], $retail_total );
+			if ( '' !== $note ) {
+				$order->update_meta_data( $k['note'], $note );
+			}
 			if ( $a['claimant_user_id'] ) {
 				$order->update_meta_data( $k['claimant'], (int) $a['claimant_user_id'] );
 			}

@@ -32,6 +32,7 @@ if ( ! function_exists( 'ans_comp_meta_keys' ) ) {
 			'retail'    => '_ans_comp_retail_value', // value forgone, in store currency
 			'claimant'  => '_ans_comp_claimant',     // portal claims only
 			'note'      => '_ans_comp_note',         // OPTIONAL message shown to the recipient
+			'subject'   => '_ans_comp_subject',      // OPTIONAL per-comp email subject (admin only)
 			'generated' => '_ans_comp_generated',    // idempotency guard
 		);
 	}
@@ -120,6 +121,7 @@ if ( ! function_exists( 'ans_comp_issue' ) ) {
 			'issued_by'        => get_current_user_id(),
 			'claimant_user_id' => 0,
 			'recipient_note'   => '',
+			'subject'          => '',
 		);
 		$a = wp_parse_args( $args, $defaults );
 		$k = ans_comp_meta_keys();
@@ -279,6 +281,17 @@ if ( ! function_exists( 'ans_comp_issue' ) ) {
 			$order->update_meta_data( $k['retail'], $retail_total );
 			if ( '' !== $note ) {
 				$order->update_meta_data( $k['note'], $note );
+			}
+			/*
+			 * The per-comp subject line. Cleaned by the same helper the admin
+			 * form uses, so a value arriving through the REST route cannot skip
+			 * the newline stripping that keeps it out of trouble as a header.
+			 */
+			if ( function_exists( 'ans_comp_clean_subject' ) ) {
+				$subject = ans_comp_clean_subject( $a['subject'] );
+				if ( '' !== $subject ) {
+					$order->update_meta_data( $k['subject'], $subject );
+				}
 			}
 			if ( $a['claimant_user_id'] ) {
 				$order->update_meta_data( $k['claimant'], (int) $a['claimant_user_id'] );

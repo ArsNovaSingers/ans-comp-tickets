@@ -334,6 +334,7 @@ if ( ! function_exists( 'ans_comp_admin_handle_issue' ) ) {
 				'recipient_name'  => isset( $_POST['recipient_name'] ) ? sanitize_text_field( wp_unslash( $_POST['recipient_name'] ) ) : '',
 				'recipient_email' => isset( $_POST['recipient_email'] ) ? sanitize_email( wp_unslash( $_POST['recipient_email'] ) ) : '',
 				'reason'          => isset( $_POST['reason'] ) ? sanitize_text_field( wp_unslash( $_POST['reason'] ) ) : '',
+				'recipient_note'  => isset( $_POST['recipient_note'] ) ? sanitize_textarea_field( wp_unslash( $_POST['recipient_note'] ) ) : '',
 				'source'          => 'admin',
 			)
 		);
@@ -524,6 +525,23 @@ if ( ! function_exists( 'ans_comp_admin_render_issue_form' ) ) {
 						<input type="text" id="ans_comp_reason" name="reason" class="large-text" required
 							placeholder="<?php esc_attr_e( 'e.g. Guest of the composer', 'ans-comp-tickets' ); ?>" />
 						<p class="description"><?php esc_html_e( 'Required. Every comp is a decision and the ledger records it.', 'ans-comp-tickets' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="ans_comp_note"><?php esc_html_e( 'Note to recipient', 'ans-comp-tickets' ); ?></label></th>
+					<td>
+						<textarea id="ans_comp_note" name="recipient_note" class="large-text" rows="3"
+							maxlength="<?php echo esc_attr( (string) ANS_COMP_NOTE_MAX ); ?>"
+							placeholder="<?php esc_attr_e( 'e.g. We are so glad you can join us - come and say hello afterwards.', 'ans-comp-tickets' ); ?>"></textarea>
+						<p class="description">
+							<?php
+							printf(
+								/* translators: %d: maximum characters. */
+								esc_html__( 'Optional. Appears in the email with the ticket. This is a message to the GUEST - the Reason above is the internal record and is never shown to them. Up to %d characters.', 'ans-comp-tickets' ),
+								(int) ANS_COMP_NOTE_MAX
+							);
+							?>
+						</p>
 					</td>
 				</tr>
 			</table>

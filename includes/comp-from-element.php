@@ -75,13 +75,35 @@ if ( ! function_exists( 'ans_comp_from_line' ) ) {
 }
 
 /*
- * Registered on init, defensively: Tickera may be inactive, the designer add-on may
- * be absent, and this file may be loaded twice in one request. Each is a return,
- * not a fatal - a missing ticket element is a cosmetic loss, and taking the site
- * down over it would be a far worse trade.
+ * WP_LOADED PRIORITY 10, NOT INIT. This is the whole reason 0.5.0's element never
+ * appeared in the designer, and it is worth the paragraph.
+ *
+ * Tickera loads its own base class from TC::load_addons(), which is hooked on
+ * `wp_loaded` at priority 9. WordPress fires plugins_loaded, then init, then
+ * wp_loaded - so at ANY init priority the class genuinely does not exist yet, and
+ * there is no autoloader anywhere in Tickera to resolve it lazily. The guard below
+ * was therefore false on every request, on the front end and in wp-admin alike, and
+ * returned before registering anything. No error, no warning, no element: the
+ * failure mode this project has written down as "an empty result is not an answer".
+ *
+ * Priority 10 on wp_loaded is chosen over Tickera's own
+ * `tickera_load_ticket_template_elements` action deliberately. Both would work, but
+ * the core hook is one I can reason about with certainty - 10 is unconditionally
+ * after 9 - whereas the Tickera action reaches us through a custom three-name
+ * fan-out in tickera_do_action(), and depending on that naming is how we got here.
+ * The designer builds its field list lazily at render time, so registering after
+ * the designer add-on itself has loaded is not too late.
+ *
+ * ⚠️ ars-nova-ticketing-bridge's Venue Address element registers on init 20 and has
+ * the identical defect. It is not in the designer either. Flagged, not fixed here -
+ * that is a different plugin and a different decision.
+ *
+ * The guards stay: Tickera may be inactive and the designer add-on may be absent.
+ * Each is a return, not a fatal - a missing ticket element is a cosmetic loss, and
+ * taking the site down over it would be a far worse trade.
  */
 add_action(
-	'init',
+	'wp_loaded',
 	function () {
 		if ( ! class_exists( '\Tickera\TC_Ticket_Template_Elements' ) ) {
 			return;
@@ -89,7 +111,12 @@ add_action(
 		if ( ! function_exists( '\Tickera\tickera_register_template_element' ) ) {
 			return;
 		}
-		if ( class_exists( 'ANS_Comp_From_Element' ) ) {
+		/*
+		 * `false` = do not autoload. Declaring a class inside a closure means a
+		 * second firing of this hook would be a "cannot redeclare" fatal, so this
+		 * guard is load-bearing rather than tidy.
+		 */
+		if ( class_exists( 'ANS_Comp_From_Element', false ) ) {
 			return;
 		}
 
@@ -137,7 +164,23 @@ add_action(
 			}
 		}
 
-		\Tickera\tickera_register_template_element( 'ANS_Comp_From_Element' );
+		/*
+		 * BOTH ARGUMENTS ARE REQUIRED. The signature is
+		 * tickera_register_template_element( $class_name, $element_title ) and the
+		 * second parameter has no default, so the one-argument call 0.5.0 shipped
+		 * would have thrown ArgumentCountError - a white screen - the moment the
+		 * timing bug above was fixed without this. The two defects hid each other:
+		 * the element was unreachable, so the fatal never fired.
+		 *
+		 * The designer does not actually use this title - it reads $element_title
+		 * off the instantiated object - but the legacy Ticket Templates palette
+		 * does, and the parameter is mandatory either way. Kept in step with the
+		 * class property on purpose.
+		 */
+		\Tickera\tickera_register_template_element(
+			'ANS_Comp_From_Element',
+			__( 'Comp From', 'ans-comp-tickets' )
+		);
 	},
-	20
+	10
 );

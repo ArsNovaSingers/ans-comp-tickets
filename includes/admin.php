@@ -335,6 +335,7 @@ if ( ! function_exists( 'ans_comp_admin_handle_issue' ) ) {
 				'recipient_email' => isset( $_POST['recipient_email'] ) ? sanitize_email( wp_unslash( $_POST['recipient_email'] ) ) : '',
 				'reason'          => isset( $_POST['reason'] ) ? sanitize_text_field( wp_unslash( $_POST['reason'] ) ) : '',
 				'recipient_note'  => isset( $_POST['recipient_note'] ) ? sanitize_textarea_field( wp_unslash( $_POST['recipient_note'] ) ) : '',
+				'subject'         => isset( $_POST['comp_subject'] ) ? wp_unslash( $_POST['comp_subject'] ) : '',
 				'source'          => 'admin',
 			)
 		);
@@ -517,6 +518,38 @@ if ( ! function_exists( 'ans_comp_admin_render_issue_form' ) ) {
 					<td>
 						<input type="email" id="ans_comp_email" name="recipient_email" class="regular-text" required />
 						<p class="description"><?php esc_html_e( 'Required - this is where the ticket is sent.', 'ans-comp-tickets' ); ?></p>
+					</td>
+				</tr>
+				<?php
+				/*
+				 * Jonathan, 2026-08-30, pointing at this form: "Set the subject
+				 * line to what we just set it but have an 'edit subject line'
+				 * just under Recipient Email and above Reason."
+				 *
+				 * Prefilled with the RESOLVED default, not the raw template. Kim
+				 * never sees {from}, because a comp she issues has no singer to
+				 * name - showing her a placeholder that resolves to nothing on
+				 * every comp she will ever send would be a puzzle rather than a
+				 * feature. She reads the sentence the guest will read.
+				 *
+				 * ADMIN ONLY. The Hub's cart has no equivalent field, per
+				 * Jonathan: "Singers should not be able to edit, but Kim should
+				 * in her admin portal comp paths." A subject line is the
+				 * organisation's voice reaching a member of the public.
+				 */
+				$ans_comp_subject_default = function_exists( 'ans_comp_default_subject' )
+					? trim( str_replace( '{from}', '', ans_comp_default_subject() ) )
+					: '';
+				?>
+				<tr>
+					<th scope="row"><label for="ans_comp_subject"><?php esc_html_e( 'Email subject', 'ans-comp-tickets' ); ?></label></th>
+					<td>
+						<input type="text" id="ans_comp_subject" name="comp_subject" class="large-text"
+							value="<?php echo esc_attr( $ans_comp_subject_default ); ?>"
+							maxlength="<?php echo esc_attr( (string) ( defined( 'ANS_COMP_SUBJECT_MAX' ) ? ANS_COMP_SUBJECT_MAX : 160 ) ); ?>" />
+						<p class="description">
+							<?php esc_html_e( 'The line the guest sees in their inbox. Edit it for this comp, or leave it as it is. Clear it and the standard wording is used.', 'ans-comp-tickets' ); ?>
+						</p>
 					</td>
 				</tr>
 				<tr>

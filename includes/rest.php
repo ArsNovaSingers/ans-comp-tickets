@@ -167,6 +167,22 @@ if ( ! function_exists( 'ans_comp_rest_issue' ) ) {
 				'recipient_email' => (string) $request->get_param( 'recipient_email' ),
 				'reason'          => (string) $request->get_param( 'reason' ),
 				'source'          => $request->get_param( 'source' ) ? (string) $request->get_param( 'source' ) : 'admin',
+
+				/*
+				 * PARITY WITH THE ADMIN FORM. These two were missing, so the
+				 * engine accepted them and this route silently dropped them -
+				 * a caller could pass recipient_note, get a 200, and the guest
+				 * would receive no note. Worse for diagnosis than for use: it
+				 * meant the note path could not be exercised without a person
+				 * filling in a form, which is exactly what was needed on
+				 * 2026-08-30 to work out why one comp email never arrived.
+				 *
+				 * Both are cleaned inside ans_comp_issue() rather than here, so
+				 * there is one place that decides what a note and a subject may
+				 * contain no matter which door they came through.
+				 */
+				'recipient_note'  => (string) $request->get_param( 'recipient_note' ),
+				'subject'         => (string) $request->get_param( 'subject' ),
 			)
 		);
 
